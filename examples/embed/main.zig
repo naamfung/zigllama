@@ -7,13 +7,13 @@ pub fn main() !void {
     var ollama = try Ollama.init(.{ .host = "localhost", .port = 11434, .allocator = allocator });
     defer ollama.deinit();
 
-    var input = std.ArrayList([]const u8).init(allocator);
-    try input.append("The sky is blue because of rayleigh scattering");
-    try input.append("Grass is green because of chlorophyll");
+    var input = std.ArrayList([]const u8).initCapacity(allocator, 2) catch return;
+    try input.append(allocator, "The sky is blue because of rayleigh scattering");
+    try input.append(allocator, "Grass is green because of chlorophyll");
 
     var responses = try ollama.embed(.{
         .model = "dravenk/llama3.2",
-        .input = try input.toOwnedSlice(),
+        .input = try input.toOwnedSlice(allocator),
     });
     while (try responses.next()) |response| {
         std.debug.print("total_duration: {d}\n", .{response.total_duration.?});

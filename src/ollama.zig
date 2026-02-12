@@ -5,43 +5,55 @@ pub const Api = @import("api.zig").Api;
 
 fn ResponseStream(comptime T: type) type {
     return struct {
-        request: *std.http.Client.Request,
+        response: *std.http.Client.Response,
+        allocator: std.mem.Allocator,
         var done: bool = false;
 
         pub fn deinit(self: @This()) void {
-            self.request.client.allocator.destroy(self.request);
+            self.response.request.deinit();
+            self.response.request.client.allocator.destroy(self.response.request.client);
+            self.allocator.destroy(self.response);
         }
 
         pub fn next(self: @This()) !?T {
-            const allocator = self.request.client.allocator;
+            const allocator = self.allocator;
             if (done) {
-                self.request.deinit();
                 return null;
             }
 
-            var reader = self.request.reader();
+            // Use an allocating writer to collect the response
+            var aw: std.Io.Writer.Allocating = .init(allocator);
+            defer aw.deinit();
 
-            var buffer = std.ArrayList(u8).init(allocator);
-            defer allocator.free(buffer.items);
+            // Get the body reader using bodyReaderDecompressing which returns *std.Io.Reader
+            var transfer_buffer: [64]u8 = undefined;
+            var decompress: std.http.Decompress = undefined;
+            
+            const body_reader = self.response.request.reader.bodyReaderDecompressing(
+                &transfer_buffer,
+                self.response.head.transfer_encoding,
+                self.response.head.content_length,
+                self.response.head.content_encoding,
+                &decompress,
+                &.{},
+            );
 
-            reader.streamUntilDelimiter(buffer.writer(), '\n', null) catch |err| {
+            _ = body_reader.streamDelimiter(&aw.writer, '\n') catch |err| {
                 switch (err) {
-                    // error.EndOfStream => return null,
                     error.EndOfStream => {
                         done = true;
-                        //TODO if streamable return null;
                     },
                     else => return err,
                 }
             };
 
-            if (buffer.items.len == 0) {
+            if (aw.written().len == 0) {
                 done = true;
                 return null;
             }
-            const response = try buffer.toOwnedSlice();
+            const response = try aw.toOwnedSlice();
 
-            if (self.request.response.status.class() != .success) {
+            if (self.response.head.status.class() != .success) {
                 std.debug.print("Response: {s}\n", .{response});
                 done = true;
 
@@ -58,7 +70,6 @@ fn ResponseStream(comptime T: type) type {
             }) catch |err| {
                 std.debug.print("Parsing response: {s} | err {any}\n", .{ response, err });
                 done = true;
-                self.request.deinit();
                 return null;
             };
 
@@ -98,54 +109,74 @@ pub const Ollama = struct {
 
     // model='llama3.2', messages=[{'role': 'user', 'content': 'Why is the sky blue?'}]
     pub fn chat(self: *Self, opts: types.Request.chat) !ResponseStream(types.Response.chat) {
-        const req = try self.createRequest(Api.chat, opts);
-        return .{ .request = req };
+        const response = try self.createRequest(Api.chat, opts);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn generate(self: *Self, opts: types.Request.generate) !ResponseStream(types.Response.generate) {
-        const req = try self.createRequest(Api.generate, opts);
-        return .{ .request = req };
+        const response = try self.createRequest(Api.generate, opts);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn ps(self: *Self) !ResponseStream(types.Response.ps) {
-        const req = try self.noBodyRequest(Api.ps);
-        return .{ .request = req };
+        const response = try self.noBodyRequest(Api.ps);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn embed(self: *Self, opts: types.Request.embed) !ResponseStream(types.Response.embed) {
-        const req = try self.createRequest(Api.embed, opts);
-        return .{ .request = req };
+        const response = try self.createRequest(Api.embed, opts);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn version(self: *Self) !ResponseStream(types.Response.version) {
-        const req = try self.noBodyRequest(Api.version);
-        return .{ .request = req };
+        const response = try self.noBodyRequest(Api.version);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn tags(self: *Self) !ResponseStream(types.Response.tags) {
-        const req = try self.noBodyRequest(Api.tags);
-        return .{ .request = req };
+        const response = try self.noBodyRequest(Api.tags);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn show(self: *Self, model: []const u8) !ResponseStream(types.Response.show) {
         const opts: types.Request.show = .{ .model = model };
-        const req = try self.createRequest(Api.show, opts);
-        return .{ .request = req };
+        const response = try self.createRequest(Api.show, opts);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn create(self: *Self, opts: types.Request.create) !ResponseStream(types.Response.create) {
-        const req = try self.createRequest(Api.show, opts);
-        return .{ .request = req };
+        const response = try self.createRequest(Api.show, opts);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn push(self: *Self, opts: types.Request.push) !ResponseStream(types.Response.push) {
-        const req = try self.createRequest(Api.push, opts);
-        return .{ .request = req };
+        const response = try self.createRequest(Api.push, opts);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn pull(self: *Self, opts: types.Request.pull) !ResponseStream(types.Response.pull) {
-        const req = try self.createRequest(Api.pull, opts);
-        return .{ .request = req };
+        const response = try self.createRequest(Api.pull, opts);
+        const response_ptr = try self.allocator.create(std.http.Client.Response);
+        response_ptr.* = response;
+        return .{ .response = response_ptr, .allocator = self.allocator };
     }
 
     pub fn copy(self: *Self, source: []const u8, destination: []const u8) !std.http.Status {
@@ -153,12 +184,15 @@ pub const Ollama = struct {
             .source = source,
             .destination = destination,
         };
-        const req = try self.createRequest(Api.copy, opts);
-        defer self.allocator.destroy(req);
-        return req.response.status;
+        var response = try self.createRequest(Api.copy, opts);
+        defer {
+            response.request.deinit();
+            response.request.client.allocator.destroy(response.request.client);
+        }
+        return response.head.status;
     }
 
-    fn noBodyRequest(self: *Self, api_type: Api) !*std.http.Client.Request {
+    fn noBodyRequest(self: *Self, api_type: Api) !std.http.Client.Response {
         const client = try self.allocator.create(std.http.Client);
         errdefer self.allocator.destroy(client);
         client.* = std.http.Client{ .allocator = self.allocator };
@@ -168,79 +202,60 @@ pub const Ollama = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}://{s}:{any}{s}", .{ self.schema, self.host, self.port, api_str });
         defer self.allocator.free(url);
 
-        return try fetch(client, .{
-            .method = method,
+        const uri = try std.Uri.parse(url);
+        
+        var req = try client.request(method, uri, .{
             .keep_alive = false,
-            .location = .{ .url = url },
         });
+        
+        try req.sendBodiless();
+        try req.connection.?.flush();
+        
+        // Receive response
+        var redirect_buffer: [8 * 1024]u8 = undefined;
+        return try req.receiveHead(&redirect_buffer);
     }
 
-    fn createRequest(self: *Self, api_type: Api, values: anytype) !*std.http.Client.Request {
+    fn createRequest(self: *Self, api_type: Api, values: anytype) !std.http.Client.Response {
         const client = try self.allocator.create(std.http.Client);
         errdefer self.allocator.destroy(client);
         client.* = std.http.Client{ .allocator = self.allocator };
-        // defer client.deinit();
 
         const api_str = api_type.path();
         const method = api_type.method();
         const url = try std.fmt.allocPrint(self.allocator, "{s}://{s}:{any}{s}", .{ self.schema, self.host, self.port, api_str });
         defer self.allocator.free(url);
 
-        return try self.json_request(client, method, url, values);
-    }
-
-    fn json_request(self: *Self, client: *std.http.Client, method: std.http.Method, url: []const u8, values: anytype) !*std.http.Client.Request {
-        var out = std.ArrayList(u8).init(self.allocator);
-        defer out.deinit();
-
-        try std.json.stringify(values, .{
-            .emit_null_optional_fields = false,
-        }, out.writer());
-
-        const slice = try out.toOwnedSlice();
-
-        return try fetch(client, .{
-            .method = method,
+        const uri = try std.Uri.parse(url);
+        
+        var req = try client.request(method, uri, .{
             .keep_alive = false,
-            .location = .{ .url = url },
-            .payload = slice,
         });
+        
+        // Serialize values to JSON using Allocating writer
+        var aw: std.Io.Writer.Allocating = .init(self.allocator);
+        defer aw.deinit();
+        
+        {
+            var json_writer: std.json.Stringify = .{
+                .writer = &aw.writer,
+                .options = .{
+                    .emit_null_optional_fields = false,
+                },
+            };
+            try json_writer.write(values);
+        }
+
+        const payload = try aw.toOwnedSlice();
+        
+        req.transfer_encoding = .{ .content_length = payload.len };
+        var body = try req.sendBodyUnflushed(&.{});
+        try body.writer.writeAll(payload);
+        try body.end();
+        try req.connection.?.flush();
+        
+        // Receive response
+        var redirect_buffer: [8 * 1024]u8 = undefined;
+        return try req.receiveHead(&redirect_buffer);
     }
 };
-
-//
-fn fetch(client: *std.http.Client, options: std.http.Client.FetchOptions) !*std.http.Client.Request {
-    const uri = switch (options.location) {
-        .url => |u| try std.Uri.parse(u),
-        .uri => |u| u,
-    };
-
-    const server_header_buffer = try client.allocator.alloc(u8, 1024);
-    defer client.allocator.free(server_header_buffer);
-
-    const method: std.http.Method = options.method orelse
-        if (options.payload != null) .POST else .GET;
-
-    const req = try client.allocator.create(std.http.Client.Request);
-    errdefer client.allocator.destroy(req);
-
-    req.* = try client.open(method, uri, .{
-        .server_header_buffer = options.server_header_buffer orelse server_header_buffer,
-        .redirect_behavior = options.redirect_behavior orelse
-            if (options.payload == null) @enumFromInt(3) else .unhandled,
-        .headers = options.headers,
-        .extra_headers = options.extra_headers,
-        .privileged_headers = options.privileged_headers,
-        .keep_alive = options.keep_alive,
-    });
-
-    if (options.payload) |payload| req.transfer_encoding = .{ .content_length = payload.len };
-
-    try req.send();
-
-    if (options.payload) |payload| try req.writeAll(payload);
-
-    try req.finish();
-    try req.wait();
-    return req;
-}

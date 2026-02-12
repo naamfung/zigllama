@@ -193,12 +193,12 @@ pub const Response = struct {
         eval_duration: ?u64 = null,
 
         pub fn to_json(self: @This(), allocator: std.mem.Allocator) ![]const u8 {
-            var out = std.ArrayList(u8).init(allocator);
-            defer out.deinit();
+            var out = std.ArrayList(u8).initCapacity(allocator, 256) catch return error.OutOfMemory;
+            defer out.deinit(allocator);
             try std.json.stringify(self, .{
                 .emit_null_optional_fields = false,
-            }, out.writer());
-            return try out.toOwnedSlice();
+            }, out.writer(allocator));
+            return try out.toOwnedSlice(allocator);
         }
 
         pub const @"error" = struct {
