@@ -192,6 +192,18 @@ pub const Ollama = struct {
         return response.head.status;
     }
 
+    pub fn delete(self: *Self, model: []const u8) !std.http.Status {
+        const opts: types.Request.delete = .{
+            .model = model,
+        };
+        var response = try self.createRequest(Api.delete, opts);
+        defer {
+            response.request.deinit();
+            response.request.client.allocator.destroy(response.request.client);
+        }
+        return response.head.status;
+    }
+
     fn noBodyRequest(self: *Self, api_type: Api) !std.http.Client.Response {
         const client = try self.allocator.create(std.http.Client);
         errdefer self.allocator.destroy(client);

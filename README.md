@@ -28,7 +28,7 @@ The most comprehensive Ollama client library for Zig. Provides complete access t
 | `create` | Create custom model | ✅ |
 | `copy` | Copy model | ✅ |
 | `version` | Get Ollama version | ✅ |
-| `delete` | Delete model | 🔜 |
+| `delete` | Delete model | ✅ |
 
 ## Prerequisites
 
@@ -344,6 +344,19 @@ if (status == .ok) {
 }
 ```
 
+### Delete Model
+
+Delete a model from local storage.
+
+```zig
+const status = try ollama.delete("my-custom-model");
+if (status == .ok) {
+    std.debug.print("Model deleted successfully!\n", .{});
+}
+```
+
+**Note:** This operation is irreversible. Make sure you want to permanently remove the model before calling this function.
+
 ### Version
 
 Get the Ollama server version.
@@ -568,6 +581,7 @@ The `examples/` directory contains complete examples for each API:
 - `push` - Push model to registry
 - `create` - Create custom model
 - `copy` - Copy model
+- `delete` - Delete model
 - `version` - Get Ollama version
 
 Run any example:
